@@ -347,6 +347,7 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
               }}
             </For>
             <box
+              id="tui-question-tab-confirm"
               paddingLeft={1}
               paddingRight={1}
               backgroundColor={
