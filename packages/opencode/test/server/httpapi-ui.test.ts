@@ -85,6 +85,9 @@ function uiApp(input?: {
   username?: string
   client?: Layer.Layer<HttpClient.HttpClient>
   disableEmbeddedWebUi?: boolean
+  disableHostedUiProxy?: boolean
+  sleepFriendlyCsp?: boolean
+  webEventMode?: string
 }) {
   const handler = HttpRouter.toWebHandler(
     HttpRouter.use((router) =>
@@ -93,7 +96,14 @@ function uiApp(input?: {
         const client = yield* HttpClient.HttpClient
         const flags = yield* RuntimeFlags.Service
         yield* router.add("*", "/*", (request) =>
-          serveUIEffect(request, { fs, client, disableEmbeddedWebUi: flags.disableEmbeddedWebUi }),
+          serveUIEffect(request, {
+            fs,
+            client,
+            disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+            disableHostedUiProxy: flags.disableHostedUiProxy,
+            sleepFriendlyCsp: flags.sleepFriendlyCsp,
+            webEventMode: flags.webEventMode,
+          }),
         )
       }),
     ).pipe(
@@ -101,7 +111,12 @@ function uiApp(input?: {
       Layer.provide([
         AppFileSystem.defaultLayer,
         input?.client ?? httpClient(new Response("ui")),
-        RuntimeFlags.layer({ disableEmbeddedWebUi: input?.disableEmbeddedWebUi ?? false }),
+        RuntimeFlags.layer({
+          disableEmbeddedWebUi: input?.disableEmbeddedWebUi ?? false,
+          disableHostedUiProxy: input?.disableHostedUiProxy ?? false,
+          sleepFriendlyCsp: input?.sleepFriendlyCsp ?? false,
+          webEventMode: input?.webEventMode ?? "sse",
+        }),
         HttpServer.layerServices,
         ConfigProvider.layer(
           ConfigProvider.fromUnknown({
@@ -139,7 +154,14 @@ function routeOrderingApp() {
           Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "Not Found" }, { status: 404 })),
         )
         yield* router.add("*", "/*", (request) =>
-          serveUIEffect(request, { fs, client, disableEmbeddedWebUi: flags.disableEmbeddedWebUi }),
+          serveUIEffect(request, {
+            fs,
+            client,
+            disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+            disableHostedUiProxy: flags.disableHostedUiProxy,
+            sleepFriendlyCsp: flags.sleepFriendlyCsp,
+            webEventMode: flags.webEventMode,
+          }),
         )
       }),
     ).pipe(
@@ -205,6 +227,39 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
+  it.live("does not proxy to hosted UI when hosted UI proxy is disabled", () =>
+    Effect.gen(function* () {
+      const response = yield* uiApp({
+        disableEmbeddedWebUi: true,
+        disableHostedUiProxy: true,
+        client: Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make(() => Effect.die("hosted UI proxy should not be called")),
+        ),
+      }).request("/")
+
+      expect(response.status).toBe(500)
+      expect(yield* responseText(response)).toContain("hosted UI proxy is disabled")
+    }),
+  )
+
+  it.live("returns 404 for static asset misses when hosted UI proxy is disabled", () =>
+    Effect.gen(function* () {
+      const response = yield* uiApp({
+        disableEmbeddedWebUi: true,
+        disableHostedUiProxy: true,
+        client: Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make(() => Effect.die("hosted UI proxy should not be called")),
+        ),
+      }).request("/assets/missing.js")
+
+      expect(response.status).toBe(404)
+      expect(response.headers.get("content-type")).toContain("text/plain")
+      expect(yield* responseText(response)).toBe("Not Found\n")
+    }),
+  )
+
   it.live("strips upstream transfer encoding headers from proxied assets", () =>
     Effect.gen(function* () {
       let proxiedUrl: string | undefined
@@ -217,6 +272,9 @@ describe("HttpApi UI fallback", () => {
           fs,
           client,
           disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+          disableHostedUiProxy: flags.disableHostedUiProxy,
+          sleepFriendlyCsp: flags.sleepFriendlyCsp,
+          webEventMode: flags.webEventMode,
         })
       }).pipe(
         Effect.provide(
@@ -267,6 +325,9 @@ describe("HttpApi UI fallback", () => {
           fs,
           client,
           disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+          disableHostedUiProxy: flags.disableHostedUiProxy,
+          sleepFriendlyCsp: flags.sleepFriendlyCsp,
+          webEventMode: flags.webEventMode,
         })
       }).pipe(
         Effect.provide(
@@ -326,6 +387,47 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
+  it.live("does not fall back to embedded index for missing static assets", () =>
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const response = yield* serveEmbeddedUIEffect(
+        "/assets/missing.js",
+        {
+          ...fs,
+          readFile: (path) => {
+            return path === "/$bunfs/root/index.html"
+              ? Effect.succeed(new TextEncoder().encode("<html>embedded</html>"))
+              : Effect.die(`unexpected embedded UI path: ${path}`)
+          },
+        },
+        { "index.html": "/$bunfs/root/index.html" },
+      ).pipe(Effect.map(HttpServerResponse.toWeb))
+
+      expect(response.status).toBe(404)
+    }),
+  )
+
+  it.live("falls back to embedded index for SPA navigation routes", () =>
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const response = yield* serveEmbeddedUIEffect(
+        "/some/spa/route",
+        {
+          ...fs,
+          readFile: (path) => {
+            return path === "/$bunfs/root/index.html"
+              ? Effect.succeed(new TextEncoder().encode("<html>embedded</html>"))
+              : Effect.die(`unexpected embedded UI path: ${path}`)
+          },
+        },
+        { "index.html": "/$bunfs/root/index.html" },
+      ).pipe(Effect.map(HttpServerResponse.toWeb))
+
+      expect(response.status).toBe(200)
+      expect(yield* responseText(response)).toBe("<html>embedded</html>")
+    }),
+  )
+
   it.live("allows embedded UI terminal wasm and theme preload CSP", () =>
     Effect.gen(function* () {
       const script = 'document.documentElement.dataset.theme = "dark"'
@@ -352,6 +454,70 @@ describe("HttpApi UI fallback", () => {
       expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'")
       expect(csp).toContain(`'sha256-${createHash("sha256").update(script).digest("base64")}'`)
       expect(csp).toContain("connect-src * data:")
+    }),
+  )
+
+  it.live("uses sleep-friendly connect-src for embedded UI when requested", () =>
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const response = yield* serveEmbeddedUIEffect(
+        "/",
+        {
+          ...fs,
+          readFile: (path) => {
+            return path === "/$bunfs/root/index.html"
+              ? Effect.succeed(new TextEncoder().encode("<html><head></head></html>"))
+              : Effect.die(`unexpected embedded UI path: ${path}`)
+          },
+        },
+        { "index.html": "/$bunfs/root/index.html" },
+        { sleepFriendlyCsp: true, webEventMode: "auto" },
+      ).pipe(Effect.map(HttpServerResponse.toWeb))
+
+      const csp = response.headers.get("content-security-policy") ?? ""
+      expect(csp).toContain("connect-src 'self' data:")
+      expect(csp).not.toContain("connect-src * data:")
+    }),
+  )
+
+  it.live("injects runtime web event mode into embedded HTML", () =>
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const response = yield* serveEmbeddedUIEffect(
+        "/",
+        {
+          ...fs,
+          readFile: (path) => {
+            return path === "/$bunfs/root/index.html"
+              ? Effect.succeed(new TextEncoder().encode("<html><head></head><body></body></html>"))
+              : Effect.die(`unexpected embedded UI path: ${path}`)
+          },
+        },
+        { "index.html": "/$bunfs/root/index.html" },
+        { sleepFriendlyCsp: false, webEventMode: "auto" },
+      ).pipe(Effect.map(HttpServerResponse.toWeb))
+
+      expect(yield* responseText(response)).toContain(
+        '<meta name="opencode-web-event-mode" content="auto"></head>',
+      )
+    }),
+  )
+
+  it.live("injects runtime web event mode into proxied HTML", () =>
+    Effect.gen(function* () {
+      const response = yield* uiApp({
+        disableEmbeddedWebUi: true,
+        webEventMode: "auto",
+        client: httpClient(
+          new Response("<html><head></head><body>opencode</body></html>", {
+            headers: { "content-type": "text/html" },
+          }),
+        ),
+      }).request("/")
+
+      expect(yield* responseText(response)).toContain(
+        '<meta name="opencode-web-event-mode" content="auto"></head>',
+      )
     }),
   )
 

@@ -33,6 +33,7 @@ import { SessionPrompt } from "@/session/prompt"
 import { Project } from "@/project/project"
 import { Vcs } from "@/project/vcs"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 
 void Log.init({ print: false })
 
@@ -44,7 +45,10 @@ const originalEnv = {
   OTEL_RESOURCE_ATTRIBUTES: process.env.OTEL_RESOURCE_ATTRIBUTES,
 }
 
-const workspaceLayer = (experimentalWorkspaces: boolean) =>
+const workspaceLayer = (
+  experimentalWorkspaces: boolean,
+  flags: Partial<RuntimeFlags.Info> = {},
+) =>
   Workspace.layer.pipe(
     Layer.provide(Auth.defaultLayer),
     Layer.provide(SessionNs.defaultLayer),
@@ -54,7 +58,7 @@ const workspaceLayer = (experimentalWorkspaces: boolean) =>
     Layer.provide(Vcs.defaultLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(AppFileSystem.defaultLayer),
-    Layer.provide(RuntimeFlags.layer({ experimentalWorkspaces })),
+    Layer.provide(RuntimeFlags.layer({ experimentalWorkspaces, ...flags })),
     Layer.provide(InstanceStore.defaultLayer.pipe(Layer.provide(InstanceBootstrap.defaultLayer))),
   )
 
@@ -1181,6 +1185,31 @@ describe("workspace sync state", () => {
       }),
     { git: true },
   )
+
+  test("Railway sleep mode skips remote workspace sync unless explicitly enabled", async () => {
+    await Effect.runPromise(
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const workspace = yield* Workspace.Service
+            const instance = yield* requireInstance
+            const type = unique("railway-remote-disabled")
+            const recorded = remoteAdapter("http://127.0.0.1:9/disabled")
+            const info = workspaceInfo(instance.project.id, type)
+            insertWorkspace(info)
+            registerAdapter(instance.project.id, type, recorded.adapter)
+
+            yield* workspace.startWorkspaceSyncing(instance.project.id)
+            yield* Effect.sleep("25 millis")
+
+            expect(recorded.calls.target).toHaveLength(1)
+            expect(yield* workspace.isSyncing(info.id)).toBe(false)
+            expect((yield* workspace.status()).find((item) => item.workspaceID === info.id)).toBeUndefined()
+          }).pipe(Effect.provide(workspaceLayer(true, { railwaySleepMode: true }))),
+        { git: false },
+      ).pipe(Effect.scoped, Effect.provide(CrossSpawnSpawner.defaultLayer)),
+    )
+  })
 
   it.live("remote start emits disconnected, connecting, and connected then refuses duplicate listeners", () => {
     const calls: FetchCall[] = []

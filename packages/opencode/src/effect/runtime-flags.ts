@@ -2,6 +2,7 @@ import { Config, ConfigProvider, Context, Effect, Layer, Option } from "effect"
 import { ConfigService } from "@/effect/config-service"
 
 const bool = (name: string) => Config.boolean(name).pipe(Config.withDefault(false))
+const string = (name: string, fallback: string) => Config.string(name).pipe(Config.withDefault(fallback))
 const positiveInteger = (name: string) =>
   Config.number(name).pipe(
     Config.map((value) => (Number.isInteger(value) && value > 0 ? value : undefined)),
@@ -16,11 +17,27 @@ const enabledByExperimental = (name: string) =>
 export class Service extends ConfigService.Service<Service>()("@opencode/RuntimeFlags", {
   autoShare: bool("OPENCODE_AUTO_SHARE"),
   pure: bool("OPENCODE_PURE"),
+  railwaySleepMode: bool("OPENCODE_RAILWAY_SLEEP_MODE"),
   disableDefaultPlugins: bool("OPENCODE_DISABLE_DEFAULT_PLUGINS"),
   disableChannelDb: bool("OPENCODE_DISABLE_CHANNEL_DB"),
   disableEmbeddedWebUi: bool("OPENCODE_DISABLE_EMBEDDED_WEB_UI"),
+  disableHostedUiProxy: Config.all({
+    railway: bool("OPENCODE_RAILWAY_SLEEP_MODE"),
+    direct: bool("OPENCODE_DISABLE_HOSTED_UI_PROXY"),
+  }).pipe(Config.map((flags) => flags.railway || flags.direct)),
   disableExternalSkills: bool("OPENCODE_DISABLE_EXTERNAL_SKILLS"),
   disableLspDownload: bool("OPENCODE_DISABLE_LSP_DOWNLOAD"),
+  sleepFriendlyCsp: Config.all({
+    railway: bool("OPENCODE_RAILWAY_SLEEP_MODE"),
+    direct: bool("OPENCODE_SLEEP_FRIENDLY_CSP"),
+  }).pipe(Config.map((flags) => flags.railway || flags.direct)),
+  webEventMode: Config.all({
+    railway: bool("OPENCODE_RAILWAY_SLEEP_MODE"),
+    value: string("OPENCODE_WEB_EVENT_MODE", ""),
+  }).pipe(
+    Config.map((flags) => (flags.value === "auto" || flags.value === "sse" ? flags.value : flags.railway ? "auto" : "sse")),
+  ),
+  enableRemoteWorkspaceSync: bool("OPENCODE_ENABLE_REMOTE_WORKSPACE_SYNC"),
   skipMigrations: bool("OPENCODE_SKIP_MIGRATIONS"),
   disableClaudeCodePrompt: Config.all({
     broad: bool("OPENCODE_DISABLE_CLAUDE_CODE"),

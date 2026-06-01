@@ -12,6 +12,25 @@ import { createRefCountMap } from "@/utils/refcount"
 const isAbortError = (error: unknown) =>
   error !== null && typeof error === "object" && "name" in error && error.name === "AbortError"
 
+type EventMode = "auto" | "sse"
+
+export function normalizeEventMode(value: string | undefined): EventMode {
+  return value === "auto" ? "auto" : "sse"
+}
+
+export function shouldConnectEventStream(input: { mode: EventMode; visibility?: DocumentVisibilityState }) {
+  if (input.mode === "sse") return true
+  return input.visibility === undefined || input.visibility === "visible"
+}
+
+function runtimeEventMode(): EventMode {
+  const meta =
+    typeof document === "object"
+      ? document.querySelector<HTMLMetaElement>('meta[name="opencode-web-event-mode"]')?.content
+      : undefined
+  return normalizeEventMode(meta ?? import.meta.env.VITE_OPENCODE_WEB_EVENT_MODE)
+}
+
 function createServerSdkContext(server: ServerConnection.Any) {
   const platform = usePlatform()
   const abort = new AbortController()
@@ -99,7 +118,11 @@ function createServerSdkContext(server: ServerConnection.Any) {
 
   let attempt: AbortController | undefined
   let run: Promise<void> | undefined
-  let started = false
+  let requested = false
+  let running = false
+  const eventMode = runtimeEventMode()
+  const visibility = () => (typeof document === "object" ? document.visibilityState : undefined)
+  const shouldConnect = () => shouldConnectEventStream({ mode: eventMode, visibility: visibility() })
   const HEARTBEAT_TIMEOUT_MS = 15_000
   let lastEventAt = Date.now()
   let heartbeat: ReturnType<typeof setTimeout> | undefined
@@ -117,11 +140,13 @@ function createServerSdkContext(server: ServerConnection.Any) {
   }
 
   const start = () => {
-    if (started) return run
-    started = true
+    requested = true
+    if (!shouldConnect()) return run
+    if (running) return run
+    running = true
     run = (async () => {
-      // oxlint-disable-next-line no-unmodified-loop-condition -- `started` is set to false by stop() which also aborts; both flags are checked to allow graceful exit
-      while (!abort.signal.aborted && started) {
+      // oxlint-disable-next-line no-unmodified-loop-condition -- `requested` changes through stop()/visibility handlers; the loop exits without touching backend tasks.
+      while (!abort.signal.aborted && requested && shouldConnect()) {
         attempt = new AbortController()
         lastEventAt = Date.now()
         const onAbort = () => {
@@ -189,26 +214,36 @@ function createServerSdkContext(server: ServerConnection.Any) {
           clearHeartbeat()
         }
 
-        if (abort.signal.aborted || !started) return
+        if (abort.signal.aborted || !requested || !shouldConnect()) return
         await wait(RECONNECT_DELAY_MS)
       }
     })().finally(() => {
       run = undefined
+      running = false
       flush()
+      if (requested && shouldConnect()) start()
     })
     return run
   }
 
   const stop = () => {
-    started = false
+    requested = false
+    attempt?.abort()
+    clearHeartbeat()
+  }
+
+  const pause = () => {
     attempt?.abort()
     clearHeartbeat()
   }
 
   onMount(() => {
     makeEventListener(document, "visibilitychange", () => {
-      if (document.visibilityState !== "visible") return
-      if (!started) return
+      if (eventMode !== "sse" && document.visibilityState !== "visible") {
+        pause()
+        return
+      }
+      if (requested) start()
       if (Date.now() - lastEventAt < HEARTBEAT_TIMEOUT_MS) return
       attempt?.abort()
     })
