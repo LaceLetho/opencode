@@ -440,10 +440,10 @@ describe("HttpApi UI fallback", () => {
           readFile: (path) => {
             return path === "/$bunfs/root/index.html"
               ? Effect.succeed(
-                  new TextEncoder().encode(
-                    `<html><head><script id="oc-theme-preload-script">${script}</script></head></html>`,
-                  ),
-                )
+                new TextEncoder().encode(
+                  `<html><head><script id="oc-theme-preload-script">${script}</script></head></html>`,
+                ),
+              )
               : Effect.die(`unexpected embedded UI path: ${path}`)
           },
         },
