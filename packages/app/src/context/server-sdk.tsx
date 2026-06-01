@@ -17,6 +17,25 @@ import { createCompatibleApi, type CompatibleApi } from "@/utils/server-compat"
 const isAbortError = (error: unknown) =>
   error !== null && typeof error === "object" && "name" in error && error.name === "AbortError"
 
+type EventMode = "auto" | "sse"
+
+export function normalizeEventMode(value: string | undefined): EventMode {
+  return value === "auto" ? "auto" : "sse"
+}
+
+export function shouldConnectEventStream(input: { mode: EventMode; visibility?: DocumentVisibilityState }) {
+  if (input.mode === "sse") return true
+  return input.visibility === undefined || input.visibility === "visible"
+}
+
+function runtimeEventMode(): EventMode {
+  const meta =
+    typeof document === "object"
+      ? document.querySelector<HTMLMetaElement>('meta[name="opencode-web-event-mode"]')?.content
+      : undefined
+  return normalizeEventMode(meta ?? import.meta.env.VITE_OPENCODE_WEB_EVENT_MODE)
+}
+
 const isStreamClosed = (error: unknown, signal?: AbortSignal) => isAbortError(error) || signal?.aborted === true
 export type ServerEvent = Event & { current?: OpenCodeEvent }
 type QueuedServerEvent = { directory: string; payload: ServerEvent }
@@ -254,18 +273,20 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
   let attempt: AbortController | undefined
   let run: Promise<void> | undefined
-  let started = false
+  let requested = false
   let generation = 0
+  const eventMode = runtimeEventMode()
+  const visibility = () => (typeof document === "object" ? document.visibilityState : undefined)
+  const shouldConnect = () => shouldConnectEventStream({ mode: eventMode, visibility: visibility() })
 
   const start = () => {
-    if (started) return run
-    started = true
+    requested = true
+    if (!shouldConnect()) return run
+    if (run) return run
     const active = ++generation
-    const previous = run
     const current = (async () => {
-      if (previous) await previous
-      // oxlint-disable-next-line no-unmodified-loop-condition -- `started` is set to false by stop() which also aborts; both flags are checked to allow graceful exit
-      while (!abort.signal.aborted && started && generation === active) {
+      // oxlint-disable-next-line no-unmodified-loop-condition -- `requested` is cleared by stop(); `shouldConnect()` pauses the loop while the document is hidden in auto mode
+      while (!abort.signal.aborted && requested && generation === active && shouldConnect()) {
         attempt = new AbortController()
         const onAbort = () => {
           attempt?.abort()
@@ -304,20 +325,21 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
           attempt = undefined
         }
 
-        if (abort.signal.aborted || !started || generation !== active) return
+        if (abort.signal.aborted || !requested || generation !== active || !shouldConnect()) return
         await wait(RECONNECT_DELAY_MS)
       }
     })().finally(() => {
       if (run !== current) return
       run = undefined
       flush()
+      if (requested && shouldConnect()) start()
     })
     run = current
     return run
   }
 
   const stop = () => {
-    started = false
+    requested = false
     generation++
     attempt?.abort()
   }
@@ -325,6 +347,13 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   onMount(() => {
     makeEventListener(window, "pagehide", stop)
     makeEventListener(window, "pageshow", (event) => resumeStreamAfterPageShow(event, start))
+    makeEventListener(document, "visibilitychange", () => {
+      if (!shouldConnect()) {
+        attempt?.abort()
+        return
+      }
+      if (requested) start()
+    })
   })
 
   onCleanup(() => {

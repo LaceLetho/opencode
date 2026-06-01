@@ -41,7 +41,7 @@ const originalEnv = {
   OTEL_RESOURCE_ATTRIBUTES: process.env.OTEL_RESOURCE_ATTRIBUTES,
 }
 
-const workspaceLayer = (experimentalWorkspaces: boolean) =>
+const workspaceLayer = (experimentalWorkspaces: boolean, flags: Partial<RuntimeFlags.Info> = {}) =>
   AppNodeBuilder.build(
     LayerNode.group([
       Workspace.node,
@@ -52,7 +52,7 @@ const workspaceLayer = (experimentalWorkspaces: boolean) =>
       Ripgrep.node,
     ]),
     [
-      [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkspaces })],
+      [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkspaces, ...flags })],
       [
         InstanceStore.bootstrapNode,
         Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
@@ -65,6 +65,12 @@ const testServerLayer = Layer.mergeAll(
   workspaceLayer(true),
 )
 const it = testEffect(testServerLayer)
+const itSleep = testEffect(
+  Layer.mergeAll(
+    NodeHttpServer.layer(Http.createServer, { host: "127.0.0.1", port: 0 }),
+    workspaceLayer(true, { railwaySleepMode: true }),
+  ),
+)
 
 type RecordedCreate = {
   info: WorkspaceInfo
@@ -1210,6 +1216,29 @@ describe("workspace sync state", () => {
         yield* workspace.remove(info.id)
       }),
     { git: true },
+  )
+
+  itSleep.live("Railway sleep mode skips remote workspace sync unless explicitly enabled", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const workspace = yield* Workspace.Service
+          const instance = yield* requireInstance
+          const type = unique("railway-remote-disabled")
+          const recorded = remoteAdapter("http://127.0.0.1:9/disabled")
+          const info = workspaceInfo(instance.project.id, type)
+          yield* insertWorkspace(info)
+          registerAdapter(instance.project.id, type, recorded.adapter)
+
+          yield* workspace.startWorkspaceSyncing(instance.project.id)
+          yield* Effect.sleep("25 millis")
+
+          expect(recorded.calls.target.map((item) => item.id)).toContain(info.id)
+          expect(yield* workspace.isSyncing(info.id)).toBe(false)
+          expect((yield* workspace.status()).find((item) => item.workspaceID === info.id)).toBeUndefined()
+        }),
+      { git: false },
+    ),
   )
 
   it.live("remote start emits disconnected, connecting, and connected then refuses duplicate listeners", () => {

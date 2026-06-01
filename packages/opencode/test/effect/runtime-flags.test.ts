@@ -24,6 +24,8 @@ describe("RuntimeFlags", () => {
         Effect.provide(
           fromConfig({
             OPENCODE_PURE: "true",
+            OPENCODE_RAILWAY_SLEEP_MODE: "true",
+            OPENCODE_ENABLE_REMOTE_WORKSPACE_SYNC: "true",
             OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
             OPENCODE_AUTO_SHARE: "true",
             OPENCODE_DISABLE_EMBEDDED_WEB_UI: "true",
@@ -41,10 +43,15 @@ describe("RuntimeFlags", () => {
 
       expect(flags.pure).toBe(true)
       expect(flags.autoShare).toBe(true)
+      expect(flags.railwaySleepMode).toBe(true)
       expect(flags.disableDefaultPlugins).toBe(true)
       expect(flags.disableEmbeddedWebUi).toBe(true)
+      expect(flags.disableHostedUiProxy).toBe(true)
       expect(flags.disableExternalSkills).toBe(true)
       expect(flags.disableLspDownload).toBe(true)
+      expect(flags.sleepFriendlyCsp).toBe(true)
+      expect(flags.webEventMode).toBe("auto")
+      expect(flags.enableRemoteWorkspaceSync).toBe(true)
       expect(flags.disableClaudeCodePrompt).toBe(false)
       expect(flags.enableExa).toBe(true)
       expect(flags.enableParallel).toBe(true)
@@ -107,10 +114,15 @@ describe("RuntimeFlags", () => {
 
       expect(flags.pure).toBe(false)
       expect(flags.autoShare).toBe(false)
+      expect(flags.railwaySleepMode).toBe(false)
       expect(flags.disableDefaultPlugins).toBe(true)
       expect(flags.disableEmbeddedWebUi).toBe(false)
+      expect(flags.disableHostedUiProxy).toBe(false)
       expect(flags.disableExternalSkills).toBe(false)
       expect(flags.disableLspDownload).toBe(false)
+      expect(flags.sleepFriendlyCsp).toBe(false)
+      expect(flags.webEventMode).toBe("sse")
+      expect(flags.enableRemoteWorkspaceSync).toBe(false)
       expect(flags.disableClaudeCodePrompt).toBe(false)
       expect(flags.disableClaudeCodeSkills).toBe(false)
       expect(flags.enableExa).toBe(false)

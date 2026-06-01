@@ -460,6 +460,11 @@ const layer = Layer.effect(
         return
       }
 
+      if (flags.railwaySleepMode && !flags.enableRemoteWorkspaceSync) {
+        yield* Effect.logInfo("remote workspace sync disabled in Railway sleep mode", { workspaceID: space.id })
+        return
+      }
+
       const exists = yield* FiberMap.has(syncFibers, space.id)
       if (exists && connections.get(space.id)?.status !== "error") return
 
