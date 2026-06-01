@@ -87,7 +87,7 @@ function uiApp(input?: {
   disableEmbeddedWebUi?: boolean
   disableHostedUiProxy?: boolean
   sleepFriendlyCsp?: boolean
-  webEventMode?: string
+  webEventMode?: "auto" | "sse"
 }) {
   const handler = HttpRouter.toWebHandler(
     HttpRouter.use((router) =>
