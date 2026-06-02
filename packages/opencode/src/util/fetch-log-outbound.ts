@@ -22,13 +22,12 @@ export function install() {
 function logRequest(input: RequestInfo | URL) {
   const url = urlFromInput(input)
   if (url && !isNetworkProtocol(url)) return
-  const caller = callerFrames()
-  if (!url) return log.info("outbound fetch", { target: "unknown", caller })
-  log.info("outbound fetch", {
+  const message = `outbound fetch caller=${JSON.stringify(callerFrames() || "unavailable")}`
+  if (!url) return log.info(message, { target: "unknown" })
+  log.info(message, {
     protocol: url.protocol,
     host: url.host,
     path: url.pathname,
-    caller,
   })
 }
 
