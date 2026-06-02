@@ -12,10 +12,12 @@ import { disposeMiddleware } from "./routes/instance/httpapi/lifecycle"
 import { WebSocketTracker } from "./routes/instance/httpapi/websocket-tracker"
 import { PublicApi } from "./routes/instance/httpapi/public"
 import type { CorsOptions } from "./cors"
+import { FetchLogOutbound } from "@/util/fetch-log-outbound"
 import { lazy } from "@/util/lazy"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
+FetchLogOutbound.install()
 
 const log = Log.create({ service: "server" })
 
