@@ -21,6 +21,7 @@ export function install() {
 
 function logRequest(input: RequestInfo | URL) {
   const url = urlFromInput(input)
+  if (url && !isNetworkProtocol(url)) return
   const source = sourceFrames()
   if (!url) return log.info("outbound fetch", { target: "unknown", source })
   log.info("outbound fetch", {
@@ -39,17 +40,23 @@ function urlFromInput(input: RequestInfo | URL) {
   return new URL(input)
 }
 
+function isNetworkProtocol(url: URL) {
+  return url.protocol === "http:" || url.protocol === "https:"
+}
+
 function sourceFrames() {
   if (process.env.LOG_SLEEP_BLOCKER_STACKS === "false") return undefined
-  return new Error()
-    .stack?.split("\n")
-    .slice(1)
-    .map((line) => line.trim().replace(/\s+/g, " "))
-    .filter((line) => line && !line.includes("fetch-log-outbound"))
+  const raw =
+    new Error().stack
+      ?.split("\n")
+      .slice(1)
+      .map((line) => line.trim().replace(/\s+/g, " "))
+      .filter((line) => line) ?? []
+  const filtered = raw
+    .filter((line) => !line.includes("fetch-log-outbound"))
     .filter((line) => !line.startsWith("at fetch"))
     .filter((line) => !line.startsWith("at node:"))
-    .slice(0, 6)
-    .join(" | ")
+  return (filtered.length ? filtered : raw).slice(0, 6).join(" | ")
 }
 
 export * as FetchLogOutbound from "./fetch-log-outbound"
