@@ -21,11 +21,13 @@ export function install() {
 
 function logRequest(input: RequestInfo | URL) {
   const url = urlFromInput(input)
-  if (!url) return log.info("outbound fetch", { target: "unknown" })
+  const source = sourceFrames()
+  if (!url) return log.info("outbound fetch", { target: "unknown", source })
   log.info("outbound fetch", {
     protocol: url.protocol,
     host: url.host,
     path: url.pathname,
+    source,
   })
 }
 
@@ -35,6 +37,19 @@ function urlFromInput(input: RequestInfo | URL) {
   if (typeof input !== "string") return
   if (!URL.canParse(input)) return
   return new URL(input)
+}
+
+function sourceFrames() {
+  if (process.env.LOG_SLEEP_BLOCKER_STACKS === "false") return undefined
+  return new Error()
+    .stack?.split("\n")
+    .slice(1)
+    .map((line) => line.trim().replace(/\s+/g, " "))
+    .filter((line) => line && !line.includes("fetch-log-outbound"))
+    .filter((line) => !line.startsWith("at fetch"))
+    .filter((line) => !line.startsWith("at node:"))
+    .slice(0, 6)
+    .join(" | ")
 }
 
 export * as FetchLogOutbound from "./fetch-log-outbound"
