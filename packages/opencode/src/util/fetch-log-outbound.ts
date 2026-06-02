@@ -22,13 +22,13 @@ export function install() {
 function logRequest(input: RequestInfo | URL) {
   const url = urlFromInput(input)
   if (url && !isNetworkProtocol(url)) return
-  const source = sourceFrames()
-  if (!url) return log.info("outbound fetch", { target: "unknown", source })
+  const caller = callerFrames()
+  if (!url) return log.info("outbound fetch", { target: "unknown", caller })
   log.info("outbound fetch", {
     protocol: url.protocol,
     host: url.host,
     path: url.pathname,
-    source,
+    caller,
   })
 }
 
@@ -44,7 +44,7 @@ function isNetworkProtocol(url: URL) {
   return url.protocol === "http:" || url.protocol === "https:"
 }
 
-function sourceFrames() {
+function callerFrames() {
   if (process.env.LOG_SLEEP_BLOCKER_STACKS === "false") return undefined
   const raw =
     new Error().stack
