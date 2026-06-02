@@ -1,6 +1,7 @@
-import * as Log from "@opencode-ai/core/util/log"
+import { appendFileSync } from "node:fs"
+import path from "node:path"
+import { Global } from "@opencode-ai/core/global"
 
-const log = Log.create({ service: "fetch-outbound" })
 const marker = Symbol.for("opencode.fetchLogOutbound")
 
 export function install() {
@@ -16,19 +17,39 @@ export function install() {
     return original.call(globalThis, input, init)
   }) as typeof fetch
 
-  log.info("installed outbound fetch logger")
+  record("installed outbound fetch logger")
+}
+
+function record(message: string, extra: Record<string, string> = {}) {
+  const line = [
+    ["timestamp", new Date().toISOString()],
+    ["level", "INFO"],
+    ["service", "fetch-outbound"],
+    ["message", message],
+    ...Object.entries(extra),
+  ]
+    .map(([key, value]) => `${key}=${format(value)}`)
+    .join(" ")
+  try {
+    appendFileSync(path.join(Global.Path.log, "opencode.log"), `${line}\n`)
+  } catch {
+    process.stderr.write(`${line}\n`)
+  }
+}
+
+function format(value: string) {
+  return /^[^\s="\\]+$/.test(value) ? value : JSON.stringify(value)
 }
 
 function logRequest(input: RequestInfo | URL) {
   const url = urlFromInput(input)
   if (url && !isNetworkProtocol(url)) return
-  const caller = callerFrames()
-  if (!url) return log.info("outbound fetch", { target: "unknown", caller })
-  log.info("outbound fetch", {
+  const message = `outbound fetch caller=${JSON.stringify(callerFrames() || "unavailable")}`
+  if (!url) return record(message, { target: "unknown" })
+  record(message, {
     protocol: url.protocol,
     host: url.host,
     path: url.pathname,
-    caller,
   })
 }
 
