@@ -171,12 +171,9 @@ export const layer = Layer.effect(
       pending.set(id, { info, deferred })
       yield* bus.publish(Event.Asked, info)
 
-      return yield* Effect.ensuring(
-        Deferred.await(deferred),
-        Effect.sync(() => {
-          pending.delete(id)
-        }),
-      )
+      const answers = yield* Deferred.await(deferred)
+      pending.delete(id)
+      return answers
     })
 
     const reply = Effect.fn("Question.reply")(function* (input: {
